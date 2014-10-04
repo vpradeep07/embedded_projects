@@ -36,17 +36,25 @@ class Display {
     display_state_ = display_state;
   }
 
-  void Scan(int sleep_cycles) {
-    *(digit_mapping_[0].port) |= ~digit_mapping_[0].bitmask;
-    *(digit_mapping_[1].port) &=  digit_mapping_[1].bitmask;
-    *(digit_mapping_[2].port) &=  digit_mapping_[2].bitmask;
-    *(digit_mapping_[3].port) &=  digit_mapping_[3].bitmask;
+  void Scan(int sleep_ms) {
+    for (int i = 0; i < 4; i++) {
+      // Turn off all digits
+      *(digit_mapping_[0].port) &= ~digit_mapping_[0].bitmask;
+      *(digit_mapping_[1].port) &= ~digit_mapping_[1].bitmask;
+      *(digit_mapping_[2].port) &= ~digit_mapping_[2].bitmask;
+      *(digit_mapping_[3].port) &= ~digit_mapping_[3].bitmask;
 
-    for (int i=0; i < 8; i++) {
-      if (display_state_.numbers[0][i])
-        *(segment_mapping_[i].port) &= ~segment_mapping_[i].bitmask;
-      else
-        *(segment_mapping_[i].port) |= segment_mapping_[i].bitmask;
+      // Set each of the segments that we care about
+      for (int s=0; s < 8; s++) {
+        if (display_state_.numbers[i][s])
+          *(segment_mapping_[s].port) &= ~segment_mapping_[s].bitmask;
+        else
+          *(segment_mapping_[s].port) |=  segment_mapping_[s].bitmask;
+      }
+
+      // Turn on the digit that we're on
+      *(digit_mapping_[i].port) |= digit_mapping_[i].bitmask;
+      _delay_ms(sleep_ms);
     }
   }
 
@@ -56,13 +64,20 @@ class Display {
   DisplayState display_state_;
 };
 
+void CharMapping(const char letter, bool segments[8]) {
+  switch (letter) {
+
+  }
+}
+
+
 int main (void) {
   PinMapping digit_mapping[4] =
   {
     { &DDRC, &PORTC, _BV(DDC2) }, // DIG1
     { &DDRC, &PORTC, _BV(DDC3) }, // DIG2
     { &DDRD, &PORTD, _BV(DDD3) }, // DIG3
-    { &DDRD, &PORTD, _BV(DDD4) } // DIG4
+    { &DDRD, &PORTD, _BV(DDD4) }  // DIG4
   };
 
   PinMapping segment_mapping[8] =
@@ -73,20 +88,36 @@ int main (void) {
     { &DDRC, &PORTC, _BV(DDB1) }, // D
     { &DDRB, &PORTB, _BV(DDB7) }, // E
     { &DDRD, &PORTD, _BV(DDD7) }, // F
+    { &DDRD, &PORTD, _BV(DDD5) }, // G
     { &DDRB, &PORTB, _BV(DDB6) }  // DP
   };
 
   Display display(digit_mapping, segment_mapping);
 
-  DisplayState state = {
+//  DisplayState state;
+//  for (int i=0; i < 4; i++)
+//    for (int j=0; j < 8; j++)
+//      state.numbers[i][j] = false;
+//  state.numbers[0][1] = true;
+
+  DisplayState state =
+  {
     {
-    {false, false, false, false, false, false, false, false},
-    {false, false, false, false, false, false, false, false},
+    {false, true, true, true, true, true, true, true},
+    //{true, true, true, true, true, true, true, true},
+    //{true, true, true, true, true, true, true, true},
+    //{true, true, true, true, true, true, true, true}
+    {false, true, false, false, false, false, false, false},
     {false, false, false, false, false, false, false, false},
     {false, false, false, false, false, false, false, false}
     }
   };
 
+  display.SetDisplayState(state);
+
+  while(1) {
+    display.Scan(1000);
+  }
 //  DDRC |= _BV(DDC0);
 //  DDRC |= _BV(DDC1);
 //  DDRC |= _BV(DDC2);
@@ -109,14 +140,14 @@ int main (void) {
   while(1)
   {
     // Crawl along display
-    for (int filled_segments=0; filled_segments < 8; filled_segments++) {
-      // Fill in up to i
-      for (int i=0; i < 4; i++)
-        for (int j=0; j < 8; j++)
-          state.numbers[i][j] = (bool) (i*8+j < filled_segments);
-      display.SetDisplayState(state);
-      display.Scan(1);
-      _delay_ms(1000);
-    }
+//    for (int filled_segments=0; filled_segments < 8; filled_segments++) {
+//      // Fill in up to i
+//      for (int i=0; i < 4; i++)
+//        for (int j=0; j < 8; j++)
+//          state.numbers[i][j] = (bool) (i*8+j < filled_segments);
+//      display.SetDisplayState(state);
+//      display.Scan(1);
+//      _delay_ms(200);
+//    }
   }
 }
