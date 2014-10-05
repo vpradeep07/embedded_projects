@@ -1,4 +1,4 @@
-#define F_CPU 8000000UL
+#define F_CPU 1000000UL
 
 #include <avr/io.h>
 #include <util/delay.h>
@@ -11,13 +11,16 @@ struct PinMapping {
 
 struct DisplayState {
   bool numbers[4][8];
+  bool colon;
 };
 
 class Display {
 
  public:
   Display(const PinMapping* digit_mapping,
-          const PinMapping* segment_mapping)
+          const PinMapping* segment_mapping,
+          const PinMapping& colon_high,
+          const PinMapping& colon_low)
   {
     for (int i = 0; i < 4; i++)
       digit_mapping_[i] = digit_mapping[i];
@@ -25,11 +28,17 @@ class Display {
     for (int i = 0; i < 8; i++)
       segment_mapping_[i] = segment_mapping[i];
 
+    colon_high_ = colon_high;
+    colon_low_  = colon_low;
+
     for (int i=0; i < 4; i++)
       *(digit_mapping_[i].ddr) |= digit_mapping_[i].bitmask;
 
     for (int i=0; i < 8; i++)
       *(segment_mapping_[i].ddr) |= segment_mapping_[i].bitmask;
+
+    *colon_high_.ddr |= colon_high_.bitmask;
+    *colon_low_.ddr |= colon_low_.bitmask;
   }
 
   void SetDisplayState(const DisplayState& display_state) {
@@ -44,6 +53,9 @@ class Display {
       *(digit_mapping_[2].port) &= ~digit_mapping_[2].bitmask;
       *(digit_mapping_[3].port) &= ~digit_mapping_[3].bitmask;
 
+      // Turn off colon
+      *colon_high_.port &= ~colon_high_.bitmask;
+
       // Set each of the segments that we care about
       for (int s=0; s < 8; s++) {
         if (display_state_.numbers[i][s])
@@ -56,20 +68,59 @@ class Display {
       *(digit_mapping_[i].port) |= digit_mapping_[i].bitmask;
       _delay_ms(sleep_ms);
     }
+
+    // Deal with Colon
+    // Turn off digits
+    *(digit_mapping_[0].port) &= ~digit_mapping_[0].bitmask;
+    *(digit_mapping_[1].port) &= ~digit_mapping_[1].bitmask;
+    *(digit_mapping_[2].port) &= ~digit_mapping_[2].bitmask;
+    *(digit_mapping_[3].port) &= ~digit_mapping_[3].bitmask;
+
+    // Turn off colon
+    *colon_high_.port &= ~colon_high_.bitmask;
+
+    if (display_state_.colon) {
+      *colon_high_.port |=  colon_high_.bitmask;
+      *colon_low_.port  &= ~colon_low_.bitmask;
+    }
+    else {
+      *colon_high_.port &= ~colon_high_.bitmask;
+      *colon_low_.port  |=  colon_low_.bitmask;
+    }
+    _delay_ms(sleep_ms);
+    *colon_high_.port |=  colon_high_.bitmask;
+    *colon_low_.port  &= ~colon_low_.bitmask;
   }
 
  private:
   PinMapping digit_mapping_[4];
   PinMapping segment_mapping_[8];
+  PinMapping colon_high_;
+  PinMapping colon_low_;
   DisplayState display_state_;
 };
 
-void CharMapping(const char letter, bool segments[8]) {
-  switch (letter) {
 
+static const bool digit_segments[10][7] =
+{ { 1, 1, 1, 1, 1, 1, 0}, // '0'
+  { 0, 1, 1, 0, 0, 0, 0}, // '1'
+  { 1, 1, 0, 1, 1, 0, 1}, // '2'
+  { 1, 1, 1, 1, 0, 0, 1}, // '3'
+  { 0, 1, 1, 0, 0, 1, 1}, // '4'
+  { 1, 0, 1, 1, 0, 1, 1}, // '5'
+  { 0, 0, 1, 1, 1, 1, 1}, // '6'
+  { 1, 1, 1, 0, 0, 0, 0}, // '7'
+  { 1, 1, 1, 1, 1, 1, 1}, // '8'
+  { 1, 1, 1, 0, 0, 1, 1}};// '9'
+
+void CharMapping(const unsigned char letter, bool s[8]) {
+  if (letter >= '0' || letter <= '9') {
+    for (int i = 0; i < 7; i++) {
+      s[i] = digit_segments[letter - '0'][i];
+    }
   }
+  s[7] = false; // Turn of decimal pt
 }
-
 
 int main (void) {
   PinMapping digit_mapping[4] =
@@ -84,7 +135,7 @@ int main (void) {
   {
     { &DDRB, &PORTB, _BV(DDB0) }, // A
     { &DDRC, &PORTC, _BV(DDC0) }, // B
-    { &DDRD, &PORTD, _BV(DDB6) }, // C
+    { &DDRD, &PORTD, _BV(DDD6) }, // C
     { &DDRC, &PORTC, _BV(DDB1) }, // D
     { &DDRB, &PORTB, _BV(DDB7) }, // E
     { &DDRD, &PORTD, _BV(DDD7) }, // F
@@ -92,7 +143,10 @@ int main (void) {
     { &DDRB, &PORTB, _BV(DDB6) }  // DP
   };
 
-  Display display(digit_mapping, segment_mapping);
+  PinMapping colon_high = { &DDRD, &PORTD, _BV(DDD2) };
+  PinMapping colon_low  = { &DDRD, &PORTD, _BV(DDD6) };
+
+  Display display(digit_mapping, segment_mapping, colon_high, colon_low);
 
 //  DisplayState state;
 //  for (int i=0; i < 4; i++)
@@ -113,10 +167,38 @@ int main (void) {
     }
   };
 
-  display.SetDisplayState(state);
+  // CharMapping('0', state.numbers[0]);
+  // CharMapping('1', state.numbers[1]);
+  // CharMapping('2', state.numbers[2]);
+  // CharMapping('3', state.numbers[3]);
 
+  int count = 3600;
   while(1) {
-    display.Scan(1000);
+    int remainder = count;
+    int digit;
+    digit = remainder / 600;
+    CharMapping(digit + '0', state.numbers[0]);
+    remainder = remainder - digit * 600;
+
+    digit = remainder / 60;
+    CharMapping(digit + '0', state.numbers[1]);
+    remainder = remainder - digit * 60;
+
+    digit = remainder / 10;
+    CharMapping(digit + '0', state.numbers[2]);
+    remainder = remainder - digit * 10;
+
+    CharMapping(remainder + '0', state.numbers[3]);
+
+    state.colon = true;
+
+    display.SetDisplayState(state);
+
+    for (int i=0; i < 1300; i++)
+      display.Scan(1);
+
+    if (count > 0)
+      count--;
   }
 //  DDRC |= _BV(DDC0);
 //  DDRC |= _BV(DDC1);
