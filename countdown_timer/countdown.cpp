@@ -1,4 +1,4 @@
-#define F_CPU 1000000UL
+#define F_CPU 8000000UL
 
 #include <avr/io.h>
 #include <util/delay.h>
@@ -13,6 +13,17 @@ struct DisplayState {
   bool numbers[4][8];
   bool colon;
 };
+
+void SetupIOPin(const PinMapping& pin) {
+  *(pin.ddr) |= pin.bitmask;
+}
+
+void SetPin(const PinMapping& pin, bool on) {
+  if (on)
+    *(pin.port) |=  pin.bitmask;
+  else
+    *(pin.port) &= ~pin.bitmask;
+}
 
 class Display {
 
@@ -45,7 +56,7 @@ class Display {
     display_state_ = display_state;
   }
 
-  void Scan(int sleep_ms) {
+  void Scan(int sleep_us) {
     for (int i = 0; i < 4; i++) {
       // Turn off all digits
       *(digit_mapping_[0].port) &= ~digit_mapping_[0].bitmask;
@@ -66,7 +77,7 @@ class Display {
 
       // Turn on the digit that we're on
       *(digit_mapping_[i].port) |= digit_mapping_[i].bitmask;
-      _delay_ms(sleep_ms);
+      _delay_us(sleep_us/5);
     }
 
     // Deal with Colon
@@ -87,9 +98,9 @@ class Display {
       *colon_high_.port &= ~colon_high_.bitmask;
       *colon_low_.port  |=  colon_low_.bitmask;
     }
-    _delay_ms(sleep_ms);
-    *colon_high_.port |=  colon_high_.bitmask;
-    *colon_low_.port  &= ~colon_low_.bitmask;
+    _delay_us(sleep_us/5);
+    *colon_high_.port &= ~colon_high_.bitmask;
+    *colon_low_.port  |=  colon_low_.bitmask;
   }
 
  private:
@@ -146,6 +157,12 @@ int main (void) {
   PinMapping colon_high = { &DDRD, &PORTD, _BV(DDD2) };
   PinMapping colon_low  = { &DDRD, &PORTD, _BV(DDD6) };
 
+  PinMapping speaker_low = {&DDRB, &PORTB, _BV(DDB2) };
+  //PinMapping speaker_low = {&DDRD, &PORTD, _BV(DDD0) };
+
+  SetupIOPin(speaker_low);
+  SetPin(speaker_low, true);
+
   Display display(digit_mapping, segment_mapping, colon_high, colon_low);
 
 //  DisplayState state;
@@ -194,8 +211,16 @@ int main (void) {
 
     display.SetDisplayState(state);
 
-    for (int i=0; i < 1300; i++)
-      display.Scan(1);
+    for (int i=0; i < 950; i++)
+      display.Scan(1000);
+
+    bool speaker_state = true;
+    for (int i=0; i < 200; i++) {
+      SetPin(speaker_low, speaker_state);
+      speaker_state = !speaker_state;
+      _delay_us(250);
+    }
+    SetPin(speaker_low, true);
 
     if (count > 0)
       count--;
