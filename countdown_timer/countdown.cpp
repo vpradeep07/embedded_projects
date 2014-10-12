@@ -6,6 +6,7 @@
 struct PinMapping {
   volatile uint8_t* ddr;     // Data direction port
   volatile uint8_t* port;    // data port
+  volatile uint8_t* pin;     // input
   uint8_t  bitmask; // bit
 };
 
@@ -16,6 +17,21 @@ struct DisplayState {
 
 void SetupIOPin(const PinMapping& pin) {
   *(pin.ddr) |= pin.bitmask;
+}
+
+void ConfigureAsInput(const PinMapping& pin, bool pullup) {
+  *(pin.ddr) &= ~pin.bitmask;
+  if (pullup)
+    *(pin.port) |= pin.bitmask;
+  else
+    *(pin.port) &= ~pin.bitmask;
+}
+
+bool GetInputPinState(const PinMapping& pin) {
+  if (*pin.pin & pin.bitmask)
+    return true;
+  else
+    return false;
 }
 
 void SetPin(const PinMapping& pin, bool on) {
@@ -134,34 +150,43 @@ void CharMapping(const unsigned char letter, bool s[8]) {
 }
 
 int main (void) {
+  // Enable PullUps
+  MCUCR &= ~_BV(PUD);
+
   PinMapping digit_mapping[4] =
   {
-    { &DDRC, &PORTC, _BV(DDC2) }, // DIG1
-    { &DDRC, &PORTC, _BV(DDC3) }, // DIG2
-    { &DDRD, &PORTD, _BV(DDD3) }, // DIG3
-    { &DDRD, &PORTD, _BV(DDD4) }  // DIG4
+    { &DDRC, &PORTC, &PINC, _BV(DDC2) }, // DIG1
+    { &DDRC, &PORTC, &PINC, _BV(DDC3) }, // DIG2
+    { &DDRD, &PORTD, &PIND, _BV(DDD3) }, // DIG3
+    { &DDRD, &PORTD, &PIND, _BV(DDD4) }  // DIG4
   };
 
   PinMapping segment_mapping[8] =
   {
-    { &DDRB, &PORTB, _BV(DDB0) }, // A
-    { &DDRC, &PORTC, _BV(DDC0) }, // B
-    { &DDRD, &PORTD, _BV(DDD6) }, // C
-    { &DDRC, &PORTC, _BV(DDB1) }, // D
-    { &DDRB, &PORTB, _BV(DDB7) }, // E
-    { &DDRD, &PORTD, _BV(DDD7) }, // F
-    { &DDRD, &PORTD, _BV(DDD5) }, // G
-    { &DDRB, &PORTB, _BV(DDB6) }  // DP
+    { &DDRB, &PORTB, &PINB, _BV(DDB0) }, // A
+    { &DDRC, &PORTC, &PINC, _BV(DDC0) }, // B
+    { &DDRD, &PORTD, &PIND, _BV(DDD6) }, // C
+    { &DDRC, &PORTC, &PINC, _BV(DDB1) }, // D
+    { &DDRB, &PORTB, &PINB, _BV(DDB7) }, // E
+    { &DDRD, &PORTD, &PIND, _BV(DDD7) }, // F
+    { &DDRD, &PORTD, &PIND, _BV(DDD5) }, // G
+    { &DDRB, &PORTB, &PINB, _BV(DDB6) }  // DP
   };
 
-  PinMapping colon_high = { &DDRD, &PORTD, _BV(DDD2) };
-  PinMapping colon_low  = { &DDRD, &PORTD, _BV(DDD6) };
+  PinMapping colon_high = { &DDRD, &PORTD, &PIND, _BV(DDD2) };
+  PinMapping colon_low  = { &DDRD, &PORTD, &PIND, _BV(DDD6) };
 
-  PinMapping speaker_low = {&DDRB, &PORTB, _BV(DDB2) };
+  PinMapping speaker_low = {&DDRB, &PORTB, &PINB, _BV(DDB2) };
   //PinMapping speaker_low = {&DDRD, &PORTD, _BV(DDD0) };
 
   SetupIOPin(speaker_low);
   SetPin(speaker_low, true);
+
+  PinMapping blue_wire   = {&DDRC, &PORTC, &PINC, _BV(DDC4) };
+  PinMapping green_wire  = {&DDRC, &PORTC, &PINC, _BV(DDC5) };
+
+  ConfigureAsInput(blue_wire, true);
+  ConfigureAsInput(green_wire, true);
 
   Display display(digit_mapping, segment_mapping, colon_high, colon_low);
 
@@ -189,7 +214,8 @@ int main (void) {
   // CharMapping('2', state.numbers[2]);
   // CharMapping('3', state.numbers[3]);
 
-  int count = 3600;
+  const int initial_count = 3600;
+  int count = initial_count-1;
   while(1) {
     int remainder = count;
     int digit;
@@ -211,18 +237,49 @@ int main (void) {
 
     display.SetDisplayState(state);
 
-    for (int i=0; i < 950; i++)
-      display.Scan(1000);
+    // Blue Wire: Causes faster countdown
+    // Green wire: Causes timer to go back to starting number
+    // Yellow wire: Does nothing
+    bool blue_wire_state = GetInputPinState(blue_wire);
+    bool green_wire_state = GetInputPinState(green_wire);
 
-    bool speaker_state = true;
-    for (int i=0; i < 200; i++) {
-      SetPin(speaker_low, speaker_state);
-      speaker_state = !speaker_state;
-      _delay_us(250);
+    int cur_cycles;
+    int speaker_cycles;
+    if (green_wire_state) {
+      cur_cycles = 25;
+      speaker_cycles = 100;
+    }
+    else {
+      if (blue_wire_state) {
+        cur_cycles = 200;
+        speaker_cycles = 400;
+      }
+      else {
+        cur_cycles = 900;
+        speaker_cycles = 400;
+      }
+    }
+
+    for (int i=0; i < cur_cycles; i++) {
+      display.Scan(1000);
+    }
+
+    if (count < initial_count) {
+      bool speaker_state = true;
+      for (int i=0; i < speaker_cycles; i++) {
+        SetPin(speaker_low, speaker_state);
+        speaker_state = !speaker_state;
+        _delay_us(125);
+      }
     }
     SetPin(speaker_low, true);
 
-    if (count > 0)
+    if (green_wire_state) {
+      if (count < initial_count) {
+        count++;
+      }
+    }
+    else if (count > 0)
       count--;
   }
 //  DDRC |= _BV(DDC0);
